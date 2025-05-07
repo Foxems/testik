@@ -1,6 +1,9 @@
 --[[
-    Robot Claw Collector - vRapidMultiCycle - Custom UI & CORRECT Logic
-    MODIFIED: Rapidly starts minigame, grabs one new item, finishes, skips cooldown, and repeats.
+    Robot Claw Collector - vCorrected_Win - Custom UI & CORRECT Logic
+    Uses CollectionService:GetTagged("ClawToyModel") and GetAttribute("ItemGUID")
+    based on provided game script analysis.
+    MODIFIED: Collects all items and then fires FinishMinigame to trigger win.
+    FURTHER MODIFIED: Runs 30 instances concurrently and removes/reduces cooldowns.
 ]]
 
 -- Store original print/warn functions IMMEDIATELY
@@ -8,7 +11,7 @@ local _G = getfenv(0)
 local oldPrint = _G.print
 local oldWarn = _G.warn
 
-oldPrint("DEBUG: Script initiated. Corrected Logic. Version: RapidMultiCycle_1.2")
+oldPrint("DEBUG: Script initiated. Corrected Logic (Tags/Attributes). Version: Corrected_Win_1.0_Concurrent30")
 
 -- Services
 local CoreGui = game:GetService("CoreGui")
@@ -17,20 +20,18 @@ local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
-local CollectionService = game:GetService("CollectionService")
+local CollectionService = game:GetService("CollectionService") -- Crucial service
 
 -- Script Configuration
-local SCRIPT_TITLE = "Claw Collector Pro (Rapid Multi-Cycle)"
-local MAX_CONSOLE_LINES = 120
+local SCRIPT_TITLE = "Claw Collector Pro (Corrected Win - x30 Concurrent)"
+local MAX_CONSOLE_LINES = 250 -- Increased for concurrent logging
 local CONSOLE_AUTO_SCROLL = true
 local WINDOW_INITIAL_VISIBLE = true
-local ITEM_TAG = "ClawToyModel"
-local ITEM_ID_ATTRIBUTE = "ItemGUID"
-local CURRENT_MINIGAME_NAME = "Robot Claw"
-local MAX_RAPID_CYCLES = 15 -- How many times to try the start/grab/finish/skip cycle
-local CYCLE_DELAY = 0.2     -- Seconds to wait between rapid cycles. Tune this! (0.1 - 0.5)
+local ITEM_TAG = "ClawToyModel"       -- The correct tag from the game script
+local ITEM_ID_ATTRIBUTE = "ItemGUID" -- The correct attribute from the game script
 
--- GUI Instance Storage / Theme / GUI Creation Functions (Identical to previous version)
+
+-- GUI Instance Storage / Theme / GUI Creation Functions (Identical to last working GUI version)
 local ScreenGui, MainWindow, TitleBar, TitleLabel, SidebarFrame, ContentFrame
 local Tabs = {}
 local CurrentTabContent = nil
@@ -62,7 +63,7 @@ local function BuildGUI()
     Tabs = {}
     local tabOrder = 1
     local function AddTab(name) local p=CreateContentPage(name,ContentFrame);local b=CreateSidebarButton(name,tabOrder,SidebarFrame);local d={name=name,button=b,content=p,order=tabOrder};Tabs[tabOrder]=d;b.MouseButton1Click:Connect(function()SelectTab(d)end);tabOrder=tabOrder+1;return p end
-    local collectorPage=AddTab("Collector");local cS=CreateSection("Auto Actions",collectorPage);CreateButton("Start Robot Claw",cS,function()AddToConsole("ACTION","Start Robot Claw button clicked.");task.spawn(Main)end)
+    local collectorPage=AddTab("Collector");local cS=CreateSection("Auto Actions",collectorPage);CreateButton("Start Robot Claw x30",cS,function()AddToConsole("ACTION","Start Robot Claw x30 button clicked.");task.spawn(Main)end) -- Modified button text
     local consolePage=AddTab("Console");local cBS=CreateSection("",consolePage);cBS.Size=UDim2.new(1,-20,0,35);cBS.Position=UDim2.new(0,10,1,-45);cBS.LayoutOrder=2
     if cBS:FindFirstChildOfClass("UIListLayout")then cBS:FindFirstChildOfClass("UIListLayout"):Destroy()end;CreateElement("UIListLayout",{Parent=cBS,FillDirection=Enum.FillDirection.Horizontal,HorizontalAlignment=Enum.HorizontalAlignment.Center,VerticalAlignment=Enum.VerticalAlignment.Center,Padding=UDim.new(0,10)})
     CreateButton("Clear",cBS,function()for _,lL in ipairs(ConsoleScrollingFrame:GetChildren())do if lL:IsA("TextLabel")then lL:Destroy()end end;consoleLogLines={};AddToConsole("INFO","Console cleared.")end).Size=UDim2.new(0.45,0,1,0)
@@ -75,14 +76,15 @@ local function BuildGUI()
     CreateDraggable(MainWindow,TitleBar)
     oldPrint("DEBUG: BuildGUI finished successfully.")
 end
-AddToConsole = function(type, ...) if not ConsoleScrollingFrame or not ConsoleScrollingFrame.Parent or not ConsoleUIListLayout or not ConsoleUIListLayout.Parent then oldPrint("CONSOLE_ERROR: Console GUI not fully ready. Message:", type, ...); return end; local args = {...}; local message = table.concat(args, " "); local prefix = "["..string.upper(type or "MSG").."] "; local fullMessage = prefix..message; local rawMessage = fullMessage; local color = THEME.TextSecondary; if type=="INFO"then color=THEME.TextSecondary elseif type=="ACTION"then color=THEME.Accent elseif type=="WARN"then color=Color3.fromRGB(255,180,0)elseif type=="ERROR"then color=Color3.fromRGB(255,80,80)end; table.insert(consoleLogLines, {text=fullMessage, color=color, raw=rawMessage}); if #consoleLogLines > MAX_CONSOLE_LINES then table.remove(consoleLogLines, 1); local firstChild = ConsoleScrollingFrame:FindFirstChildOfClass("TextLabel"); if firstChild then firstChild:Destroy() end end; local lineLabel = CreateElement("TextLabel", {Text=fullMessage,Font=THEME.FontSecondary,TextSize=THEME.FontSizeSmall,TextColor3=color,TextXAlignment=Enum.TextXAlignment.Left,TextWrapped=true,BackgroundTransparency=1,Size=UDim2.new(1,-ConsoleScrollingFrame.ScrollBarThickness-4,0,0),AutomaticSize=Enum.AutomaticSize.Y,Parent=ConsoleScrollingFrame}); if CONSOLE_AUTO_SCROLL and ConsoleScrollingFrame.Parent then task.wait(); ConsoleScrollingFrame.CanvasPosition = Vector2.new(0, ConsoleUIListLayout.AbsoluteContentSize.Y) end; oldPrint(fullMessage) end
+AddToConsole = function(type, ...) if not ConsoleScrollingFrame or not ConsoleScrollingFrame.Parent or not ConsoleUIListLayout or not ConsoleUIListLayout.Parent then oldPrint("CONSOLE_ERROR: Console GUI not fully ready. Message:", type, ...); return end; local args = {...}; local message = table.concat(args, " "); local prefix = "["..string.upper(type or "MSG").."] "; local fullMessage = prefix..message; local rawMessage = fullMessage; local color = THEME.TextSecondary; if type=="INFO"then color=THEME.TextSecondary elseif type=="ACTION"then color=THEME.Accent elseif type=="WARN"then color=Color3.fromRGB(255,180,0)elseif type=="ERROR"then color=Color3.fromRGB(255,80,80)end; table.insert(consoleLogLines, {text=fullMessage, color=color, raw=rawMessage}); if #consoleLogLines > MAX_CONSOLE_LINES then local toRemove = #consoleLogLines - MAX_CONSOLE_LINES; for i=1, toRemove do table.remove(consoleLogLines, 1); local firstChild = ConsoleScrollingFrame:FindFirstChildOfClass("TextLabel"); if firstChild then firstChild:Destroy() else break end end end; local lineLabel = CreateElement("TextLabel", {Text=fullMessage,Font=THEME.FontSecondary,TextSize=THEME.FontSizeSmall,TextColor3=color,TextXAlignment=Enum.TextXAlignment.Left,TextWrapped=true,BackgroundTransparency=1,Size=UDim2.new(1,-ConsoleScrollingFrame.ScrollBarThickness-4,0,0),AutomaticSize=Enum.AutomaticSize.Y,Parent=ConsoleScrollingFrame}); if CONSOLE_AUTO_SCROLL and ConsoleScrollingFrame.Parent then task.wait(); ConsoleScrollingFrame.CanvasPosition = Vector2.new(0, ConsoleUIListLayout.AbsoluteContentSize.Y) end; oldPrint(fullMessage) end
 _G.print = function(...) AddToConsole("PRINT", ...) end
 _G.warn = function(...) AddToConsole("WARN", ...) end
 -- =========================================================================
--- CORE SCRIPT LOGIC
+-- =========================================================================
+-- CORE SCRIPT LOGIC (Robot Claw Collector)
 -- =========================================================================
 local remoteEventCache = nil
-local isMinigameLogicRunning = false
+local isMinigameBatchRunning = false -- Renamed for clarity with batch operation
 
 local function GetRemoteEvent()
     if remoteEventCache and remoteEventCache.Parent then return remoteEventCache end
@@ -100,163 +102,147 @@ end
 
 function StartRobotClawInsane()
     local remote = GetRemoteEvent()
-    if not remote then return false end
-    local args = { "StartMinigame", CURRENT_MINIGAME_NAME, "Insane" }
-    print("ACTION", "Attempting to fire StartMinigame:", CURRENT_MINIGAME_NAME, "(Insane)")
+    if not remote then return false end -- Return status
+    local args = { "StartMinigame", "Robot Claw", "Insane" }
+    -- print("ACTION", "Attempting to fire StartMinigame: Robot Claw (Insane)") -- Too spammy for concurrent
     local success, err = pcall(function() remote:FireServer(unpack(args)) end)
-    if not success then warn("ERROR","Failed to fire StartMinigame event:",err); return false end
-    print("INFO","StartMinigame event fired.")
+    if not success then warn("ERROR","Failed to fire StartMinigame event:",err) return false end
+    -- else print("INFO","StartMinigame event fired.") end -- Too spammy
     return true
 end
 
 function GrabItem(itemId)
     local remote = GetRemoteEvent()
-    if not remote then return false end
+    if not remote then return end
     local args = { "GrabMinigameItem", itemId }
-    local success, err = pcall(function() remote:FireServer(unpack(args)) end)
-    if not success then warn("ERROR","Failed to fire GrabItem event for", itemId, ":", err); return false end
-    return true
+    pcall(function() remote:FireServer(unpack(args)) end)
 end
 
 local function AttemptFinishMinigame()
     local remote = GetRemoteEvent()
     if not remote then
-        warn("WARN", "AttemptFinishMinigame: RemoteEvent not found.")
-        return false
+        warn("WARN", "AttemptFinishMinigame: RemoteEvent not found. Cannot finish.")
+        return
     end
-    print("ACTION", "Attempting to fire FinishMinigame to server.")
+    -- print("ACTION", "Attempting to fire FinishMinigame to server.") -- Too spammy
     local success, err = pcall(function() remote:FireServer("FinishMinigame") end)
-    if not success then warn("ERROR", "Failed to fire FinishMinigame event:", err); return false end
-    print("INFO", "FinishMinigame event fired to server.")
-    return true
-end
-
-local function AttemptSkipCooldown(minigameName)
-    if not minigameName then warn("WARN", "AttemptSkipCooldown: minigameName not provided."); return false end
-    local remote = GetRemoteEvent()
-    if not remote then warn("WARN", "AttemptSkipCooldown: RemoteEvent not found."); return false end
-    print("ACTION", "Attempting to fire SkipMinigameCooldown for:", minigameName)
-    local args = { "SkipMinigameCooldown", minigameName }
-    local success, err = pcall(function() remote:FireServer(unpack(args)) end)
-    if not success then warn("ERROR", "Failed to fire SkipMinigameCooldown for", minigameName, ":", err); return false end
-    print("INFO", "SkipMinigameCooldown event fired for:", minigameName)
-    return true
+    if not success then
+        warn("ERROR", "Failed to fire FinishMinigame event:", err)
+    -- else
+        -- print("INFO", "FinishMinigame event fired to server. Waiting for server response.") -- Too spammy
+    end
 end
 
 function FindAllItemIDs_Corrected()
     local itemIDs = {}
-    -- No print here to reduce log spam in rapid cycles, will print summary later
+    -- print("INFO", "FindAllItemIDs_Corrected: Searching for items with tag ["..ITEM_TAG.."]") -- Too spammy
+
     local taggedItems = CollectionService:GetTagged(ITEM_TAG)
-    if #taggedItems == 0 then return itemIDs end
+    -- print("INFO", "FindAllItemIDs_Corrected: Found", #taggedItems, "instances with tag ["..ITEM_TAG.."]") -- Too spammy
+
+    if #taggedItems == 0 then
+        return itemIDs 
+    end
+
     for _, itemInstance in ipairs(taggedItems) do
         local guid = itemInstance:GetAttribute(ITEM_ID_ATTRIBUTE)
         if guid and type(guid) == "string" then
+             -- print("INFO", "FindAllItemIDs_Corrected: Found valid item. Instance:", itemInstance.Name, "| GUID from Attribute:", guid) -- Too spammy
              table.insert(itemIDs, guid)
+        else
+             warn("WARN", "FindAllItemIDs_Corrected: Tagged item ["..itemInstance.Name.."] missing or has invalid attribute ["..ITEM_ID_ATTRIBUTE.."]. Value:", tostring(guid))
         end
     end
+
+    -- print("INFO", "FindAllItemIDs_Corrected: Total", #itemIDs, "valid item IDs identified from tagged items.") -- Too spammy
     return itemIDs
 end
 
-function Main()
-    if isMinigameLogicRunning then print("WARN", "Minigame logic already running."); return end
-    isMinigameLogicRunning = true
-    print("ACTION", "Robot Claw Collector sequence initiated (Rapid Multi-Cycle).")
 
-    local collectedGuidsThisSession = {} -- Track GUIDs we've tried to grab in this Main() call
-    local successfulGrabs = 0
-    local noNewItemsStreak = 0
+local function RunSingleClawInstance(instanceNum)
+    local instancePrefix = "[Inst-"..tostring(instanceNum).."] "
+    print(instancePrefix.."ACTION", "Sequence initiated.")
 
-    for cycle = 1, MAX_RAPID_CYCLES do
-        if not (ScreenGui and ScreenGui.Parent and MainWindow and MainWindow.Visible) then
-            print("INFO", "GUI closed, stopping multi-cycle.")
-            break
-        end
-        print("INFO", "RAPID CYCLE", cycle, "/", MAX_RAPID_CYCLES, "----------------")
-
-        if not StartRobotClawInsane() then
-            warn("WARN", "CYCLE", cycle, ": Failed to start minigame. Ending sequence.")
-            break -- Critical failure
-        end
-
-        local itemsAppeared = false
-        local detectionStartTime = tick()
-        repeat
-            if #CollectionService:GetTagged(ITEM_TAG) > 0 then
-                itemsAppeared = true
-                break
-            end
-            task.wait(0.03) -- Very quick check, minimal yield
-        until tick() - detectionStartTime > 1.5 -- Max 1.5 seconds to detect *any* item after start
-
-        if not itemsAppeared then
-            print("WARN", "CYCLE", cycle, ": No items detected quickly. Ending this cycle.")
-            AttemptFinishMinigame()
-            AttemptSkipCooldown(CURRENT_MINIGAME_NAME)
-            task.wait(CYCLE_DELAY)
-            collectgarbage("collect")
-            noNewItemsStreak = noNewItemsStreak + 1
-            if noNewItemsStreak >= 3 then
-                print("INFO", "No new items detected for 3 consecutive cycles. Assuming all available items collected or game state issue.")
-                break
-            end
-            continue
-        end
-
-        local currentItemIDs = FindAllItemIDs_Corrected()
-        if #currentItemIDs > 0 then
-             print("INFO", "CYCLE", cycle, ": Found", #currentItemIDs, "item instances currently tagged.")
-        else
-            print("INFO", "CYCLE", cycle, ": FindAllItemIDs returned no items even after initial detection. Ending this cycle.")
-            AttemptFinishMinigame()
-            AttemptSkipCooldown(CURRENT_MINIGAME_NAME)
-            task.wait(CYCLE_DELAY)
-            collectgarbage("collect")
-            noNewItemsStreak = noNewItemsStreak + 1
-             if noNewItemsStreak >= 3 then
-                print("INFO", "No new items for 3 consecutive cycles. Assuming all available items collected or game state issue.")
-                break
-            end
-            continue
-        end
-
-        local targetGuid = nil
-        for _, guid in ipairs(currentItemIDs) do
-            if not collectedGuidsThisSession[guid] then
-                targetGuid = guid
-                break
-            end
-        end
-
-        if targetGuid then
-            print("ACTION", "CYCLE", cycle, ": Attempting to grab NEW item -", targetGuid)
-            if GrabItem(targetGuid) then
-                collectedGuidsThisSession[targetGuid] = true -- Mark as attempted
-                successfulGrabs = successfulGrabs + 1
-                noNewItemsStreak = 0 -- Reset streak as we targeted a new item
-            else
-                 print("WARN", "CYCLE", cycle, ": GrabItem failed for", targetGuid)
-            end
-        else
-            print("INFO", "CYCLE", cycle, ": All", #currentItemIDs, "currently visible items already attempted this session or no new ones found.")
-            noNewItemsStreak = noNewItemsStreak + 1
-            if noNewItemsStreak >= 3 then
-                print("INFO", "No new items to target for 3 consecutive cycles. Assuming all available items collected.")
-                break -- Break outer loop
-            end
-        end
-
-        AttemptFinishMinigame()
-        AttemptSkipCooldown(CURRENT_MINIGAME_NAME)
-
-        print("INFO", "CYCLE", cycle, "ended. Waiting", CYCLE_DELAY, "s...")
-        task.wait(CYCLE_DELAY)
-        collectgarbage("collect") -- Help manage memory during rapid loops
+    if not StartRobotClawInsane() then
+        print(instancePrefix.."WARN", "Failed to start minigame. Aborting instance.")
+        return
     end
 
-    print("INFO", "Rapid multi-cycle finished. Attempted to grab", successfulGrabs, "new items over the cycles.")
-    print("INFO", "Total unique GUIDs attempted this session:", table.maxn(collectedGuidsThisSession) > 0 and #table.pack(next(collectedGuidsThisSession)) or 0) -- A way to count keys
-    isMinigameLogicRunning = false
+    print(instancePrefix.."INFO", "Waiting for items (max 5s)...")
+    local startTime = tick()
+    local itemsDetected = false
+    
+    repeat
+        if not (ScreenGui and ScreenGui.Parent and MainWindow and MainWindow.Visible) then
+            print(instancePrefix.."INFO","GUI closed, aborting this instance.")
+            return
+        end
+
+        if #CollectionService:GetTagged(ITEM_TAG) > 0 then
+             print(instancePrefix.."INFO", "Items detected! Time:", string.format("%.1fs", tick()-startTime))
+             itemsDetected = true; break
+        end
+        task.wait(0.1) -- Poll for items
+    until tick() - startTime > 5 -- Timeout
+
+    if not itemsDetected then
+        warn(instancePrefix.."WARN", "Timeout: No items detected. Aborting instance.")
+        return
+    end
+
+    -- No extra wait for full spawn, proceed immediately
+    local itemIDsToCollect = FindAllItemIDs_Corrected()
+
+    if #itemIDsToCollect == 0 then
+        warn(instancePrefix.."WARN", "Items were detected, but no valid GUIDs found. Aborting instance.")
+        return
+    end
+
+    print(instancePrefix.."ACTION", "Collecting", #itemIDsToCollect, "items...")
+    for i, itemID in ipairs(itemIDsToCollect) do
+        if not (ScreenGui and ScreenGui.Parent and MainWindow and MainWindow.Visible) then
+            print(instancePrefix.."INFO","GUI closed, aborting collection.")
+            return
+        end
+        -- print(instancePrefix.."INFO", "Collecting item", i, "/", #itemIDsToCollect, "-", itemID) -- Can be very spammy
+        GrabItem(itemID)
+        -- NO WAIT HERE, as requested
+    end
+
+    if not (ScreenGui and ScreenGui.Parent and MainWindow and MainWindow.Visible) then
+        print(instancePrefix.."INFO","GUI closed before finishing. Not attempting FinishMinigame.")
+        return
+    end
+
+    print(instancePrefix.."INFO", "Collection cycle completed for", #itemIDsToCollect, "items.")
+    
+    -- No extra wait before finish
+    AttemptFinishMinigame()
+
+    print(instancePrefix.."INFO", "Logic complete. Server will confirm end.")
 end
+
+
+function Main()
+    if isMinigameBatchRunning then 
+        print("WARN", "Main trigger: A batch of 30 instances is already running or was recently triggered. Please wait.")
+        return 
+    end
+    isMinigameBatchRunning = true
+    print("ACTION", "Robot Claw Collector: Initiating 30 concurrent instances.")
+
+    for i = 1, 30 do
+        task.spawn(RunSingleClawInstance, i)
+        -- No wait between spawns for "at once" behavior
+    end
+
+    -- Reset the flag after a delay to allow re-triggering the batch
+    task.delay(5, function() 
+        isMinigameBatchRunning = false
+        print("INFO", "Main trigger: Cooldown ended. Ready for new batch of 30 instances.")
+    end)
+end
+
 -- =========================================================================
 -- INITIALIZATION
 -- =========================================================================
@@ -264,7 +250,7 @@ local guiBuildSuccess, guiError = pcall(BuildGUI)
 
 if guiBuildSuccess and ScreenGui and MainWindow then
     AddToConsole("INFO", SCRIPT_TITLE .. " initialized. GUI ready.")
-    AddToConsole("INFO", "Select 'Collector' tab and click 'Start Robot Claw'.")
+    AddToConsole("INFO", "Select 'Collector' tab and click 'Start Robot Claw x30'.")
 else
     oldWarn("FATAL_ERROR: GUI could not be built or essential elements are missing. Error:", guiError or "Unknown GUI Build Error")
     oldPrint("FATAL_ERROR: GUI could not be built. Script may not be fully functional. Check default console for earlier DEBUG messages.")
