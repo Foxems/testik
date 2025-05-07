@@ -1,7 +1,7 @@
 --[[
-    Robot Claw Collector - vSearchWorkspace - Custom UI & "Search Everywhere" Logic
-    Designed for mobile (e.g., Delta), aiming for Moon X style.
-    Focus: Broad item detection across Workspace.
+    Robot Claw Collector - vCorrected - Custom UI & CORRECT Logic
+    Uses CollectionService:GetTagged("ClawToyModel") and GetAttribute("ItemGUID")
+    based on provided game script analysis.
 ]]
 
 -- Store original print/warn functions IMMEDIATELY
@@ -9,7 +9,7 @@ local _G = getfenv(0)
 local oldPrint = _G.print
 local oldWarn = _G.warn
 
-oldPrint("DEBUG: Script initiated. Custom UI & 'Search Everywhere' Logic. Version: SearchWorkspace_1")
+oldPrint("DEBUG: Script initiated. Corrected Logic (Tags/Attributes). Version: Corrected_1")
 
 -- Services
 local CoreGui = game:GetService("CoreGui")
@@ -18,37 +18,25 @@ local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
+local CollectionService = game:GetService("CollectionService") -- Crucial service
 
 -- Script Configuration
-local SCRIPT_TITLE = "Claw Collector Pro (SW)" -- SW for Search Workspace
+local SCRIPT_TITLE = "Claw Collector Pro (Corrected)" 
 local MAX_CONSOLE_LINES = 120 
 local CONSOLE_AUTO_SCROLL = true
 local WINDOW_INITIAL_VISIBLE = true
+local ITEM_TAG = "ClawToyModel"       -- The correct tag from the game script
+local ITEM_ID_ATTRIBUTE = "ItemGUID" -- The correct attribute from the game script
 
--- GUI Instance Storage
-local ScreenGui
-local MainWindow
-local TitleBar, TitleLabel
-local SidebarFrame, ContentFrame
+
+-- GUI Instance Storage / Theme / GUI Creation Functions (Identical to last working GUI version)
+local ScreenGui, MainWindow, TitleBar, TitleLabel, SidebarFrame, ContentFrame
 local Tabs = {} 
 local CurrentTabContent = nil
-
--- Console Specific
 local ConsoleScrollingFrame, ConsoleUIListLayout
 local consoleLogLines = {}
-
--- GUI Theme/Style (Approximating Moon X)
-local THEME = {
-    Background = Color3.fromRGB(35, 38, 46), Sidebar = Color3.fromRGB(28, 30, 37), Content = Color3.fromRGB(35, 38, 46), TitleBar = Color3.fromRGB(22, 24, 29), TextPrimary = Color3.fromRGB(220, 221, 222), TextSecondary = Color3.fromRGB(150, 152, 158), Accent = Color3.fromRGB(88, 101, 242), AccentHover = Color3.fromRGB(71, 82, 196), Button = Color3.fromRGB(54, 57, 66), ButtonHover = Color3.fromRGB(64, 68, 78), InputBorder = Color3.fromRGB(20, 20, 20), ActiveTabButton = Color3.fromRGB(45, 48, 56), Font = Enum.Font.GothamSemibold, FontSecondary = Enum.Font.Gotham, FontSize = 14, FontSizeSmall = 12, FontSizeTitle = 16,
-}
-
--- Forward declare functions
-local AddToConsole
-local CreateDraggable
-
--- =========================================================================
--- GUI CREATION FUNCTIONS (Copied from previous working version)
--- =========================================================================
+local THEME = { Background = Color3.fromRGB(35, 38, 46), Sidebar = Color3.fromRGB(28, 30, 37), Content = Color3.fromRGB(35, 38, 46), TitleBar = Color3.fromRGB(22, 24, 29), TextPrimary = Color3.fromRGB(220, 221, 222), TextSecondary = Color3.fromRGB(150, 152, 158), Accent = Color3.fromRGB(88, 101, 242), AccentHover = Color3.fromRGB(71, 82, 196), Button = Color3.fromRGB(54, 57, 66), ButtonHover = Color3.fromRGB(64, 68, 78), InputBorder = Color3.fromRGB(20, 20, 20), ActiveTabButton = Color3.fromRGB(45, 48, 56), Font = Enum.Font.GothamSemibold, FontSecondary = Enum.Font.Gotham, FontSize = 14, FontSizeSmall = 12, FontSizeTitle = 16, }
+local AddToConsole -- Forward declare
 local function CreateElement(className, properties) local element = Instance.new(className); for prop, value in pairs(properties or {}) do element[prop] = value end; return element end
 local function SelectTab(tabData) if CurrentTabContent then CurrentTabContent.Visible = false end; for _, t in ipairs(Tabs) do t.button.BackgroundColor3 = (t == tabData) and THEME.ActiveTabButton or THEME.Sidebar; t.button.TextColor3 = (t == tabData) and THEME.Accent or THEME.TextPrimary end; tabData.content.Visible = true; CurrentTabContent = tabData.content end
 local function CreateSidebarButton(text, order, parent) local b = CreateElement("TextButton", {Name=text.."TabButton",Text="  "..text,TextColor3=THEME.TextPrimary,Font=THEME.Font,TextSize=THEME.FontSize,TextXAlignment=Enum.TextXAlignment.Left,BackgroundColor3=THEME.Sidebar,BorderSizePixel=0,Size=UDim2.new(1,0,0,40),LayoutOrder=order,Parent=parent}); b.MouseEnter:Connect(function()if Tabs[order].content~=CurrentTabContent then b.BackgroundColor3=THEME.ButtonHover end end);b.MouseLeave:Connect(function()if Tabs[order].content~=CurrentTabContent then b.BackgroundColor3=THEME.Sidebar end end);return b end
@@ -56,10 +44,7 @@ local function CreateContentPage(name,parent) return CreateElement("Frame",{Name
 local function CreateSection(title,parentPage) local sF=CreateElement("Frame",{Name=title.."Section",BackgroundTransparency=1,Size=UDim2.new(1,-20,0,0),AutomaticSize=Enum.AutomaticSize.Y,Position=UDim2.new(0,10,0,10),Parent=parentPage});CreateElement("UIListLayout",{Parent=sF,SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,8)});if title and title~=""then CreateElement("TextLabel",{Name="SectionTitle",Text=title,Font=THEME.Font,TextSize=THEME.FontSizeTitle,TextColor3=THEME.TextPrimary,TextXAlignment=Enum.TextXAlignment.Left,BackgroundTransparency=1,Size=UDim2.new(1,0,0,25),LayoutOrder=0,Parent=sF})end;return sF end
 local function CreateButton(text,parentSection,callback) local b=CreateElement("TextButton",{Name=text.."Button",Text=text,Font=THEME.FontSecondary,TextSize=THEME.FontSize,TextColor3=THEME.TextPrimary,BackgroundColor3=THEME.Button,BorderSizePixel=1,BorderColor3=THEME.InputBorder,Size=UDim2.new(1,0,0,35),LayoutOrder=(parentSection:FindFirstChild("UIListLayout")and #parentSection:GetChildren()or 1),Parent=parentSection});CreateElement("UICorner",{CornerRadius=UDim.new(0,4),Parent=b});b.MouseEnter:Connect(function()b.BackgroundColor3=THEME.ButtonHover end);b.MouseLeave:Connect(function()b.BackgroundColor3=THEME.Button end);if callback then b.MouseButton1Click:Connect(callback)end;return b end
 local function CreateToggle(text,parentSection,initialValue,callback) local tF=CreateElement("Frame",{Name=text.."Toggle",BackgroundTransparency=1,Size=UDim2.new(1,0,0,30),LayoutOrder=(parentSection:FindFirstChild("UIListLayout")and #parentSection:GetChildren()or 1),Parent=parentSection});CreateElement("TextLabel",{Text=text,Font=THEME.FontSecondary,TextSize=THEME.FontSize,TextColor3=THEME.TextSecondary,BackgroundTransparency=1,Size=UDim2.new(0.8,-5,1,0),TextXAlignment=Enum.TextXAlignment.Left,Parent=tF});local s=CreateElement("TextButton",{Text="",BackgroundColor3=initialValue and THEME.Accent or THEME.Button,Size=UDim2.new(0.2,0,0.8,0),Position=UDim2.new(0.8,0,0.1,0),Parent=tF});local k=CreateElement("Frame",{BackgroundColor3=THEME.TextPrimary,Size=UDim2.new(0.4,0,0.8,0),Position=UDim2.new(initialValue and 0.55 or 0.05,0,0.1,0),Parent=s});CreateElement("UICorner",{CornerRadius=UDim.new(0,6),Parent=s});CreateElement("UICorner",{CornerRadius=UDim.new(1,0),Parent=k});local v=initialValue;s.MouseButton1Click:Connect(function()v=not v;s.BackgroundColor3=v and THEME.Accent or THEME.Button;k:TweenPosition(UDim2.new(v and 0.55 or 0.05,0,0.1,0),Enum.EasingDirection.Out,Enum.EasingStyle.Quad,0.15,true);if callback then callback(v)end end);return tF,function()return v end,function(nV)v=nV;s.BackgroundColor3=v and THEME.Accent or THEME.Button;k.Position=UDim2.new(v and 0.55 or 0.05,0,0.1,0)end end
-
--- =========================================================================
--- MAIN GUI STRUCTURE (Copied from previous working version)
--- =========================================================================
+local function CreateDraggable(frame, triggerFrame) triggerFrame = triggerFrame or frame; local d,di,ds,op; triggerFrame.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then d=true;di=i.Position;op=frame.Position;i.Changed:Connect(function()if i.UserInputState==Enum.UserInputState.End then d=false end end)end end); triggerFrame.InputEnded:Connect(function(i)if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then d=false end end); UserInputService.InputChanged:Connect(function(i)if d and(i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch)then local delta=i.Position-di;frame.Position=UDim2.new(op.X.Scale,op.X.Offset+delta.X,op.Y.Scale,op.Y.Offset+delta.Y)end end) end
 local function BuildGUI()
     oldPrint("DEBUG: BuildGUI called.")
     if ScreenGui and ScreenGui.Parent then ScreenGui:Destroy() end ScreenGui = nil 
@@ -89,17 +74,12 @@ local function BuildGUI()
     CreateDraggable(MainWindow,TitleBar)
     oldPrint("DEBUG: BuildGUI finished successfully.")
 end
-
--- =========================================================================
--- GUI HELPER FUNCTIONS (DRAGGING, LOGGING) (Copied from previous working version)
--- =========================================================================
-function CreateDraggable(frame, triggerFrame) triggerFrame = triggerFrame or frame; local d,di,ds,op; triggerFrame.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then d=true;di=i.Position;op=frame.Position;i.Changed:Connect(function()if i.UserInputState==Enum.UserInputState.End then d=false end end)end end); triggerFrame.InputEnded:Connect(function(i)if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then d=false end end); UserInputService.InputChanged:Connect(function(i)if d and(i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch)then local delta=i.Position-di;frame.Position=UDim2.new(op.X.Scale,op.X.Offset+delta.X,op.Y.Scale,op.Y.Offset+delta.Y)end end) end
 AddToConsole = function(type, ...) if not ConsoleScrollingFrame or not ConsoleScrollingFrame.Parent or not ConsoleUIListLayout or not ConsoleUIListLayout.Parent then oldPrint("CONSOLE_ERROR: Console GUI not fully ready. Message:", type, ...); return end; local args = {...}; local message = table.concat(args, " "); local prefix = "["..string.upper(type or "MSG").."] "; local fullMessage = prefix..message; local rawMessage = fullMessage; local color = THEME.TextSecondary; if type=="INFO"then color=THEME.TextSecondary elseif type=="ACTION"then color=THEME.Accent elseif type=="WARN"then color=Color3.fromRGB(255,180,0)elseif type=="ERROR"then color=Color3.fromRGB(255,80,80)end; table.insert(consoleLogLines, {text=fullMessage, color=color, raw=rawMessage}); if #consoleLogLines > MAX_CONSOLE_LINES then table.remove(consoleLogLines, 1); local firstChild = ConsoleScrollingFrame:FindFirstChildOfClass("TextLabel"); if firstChild then firstChild:Destroy() end end; local lineLabel = CreateElement("TextLabel", {Text=fullMessage,Font=THEME.FontSecondary,TextSize=THEME.FontSizeSmall,TextColor3=color,TextXAlignment=Enum.TextXAlignment.Left,TextWrapped=true,BackgroundTransparency=1,Size=UDim2.new(1,-ConsoleScrollingFrame.ScrollBarThickness-4,0,0),AutomaticSize=Enum.AutomaticSize.Y,Parent=ConsoleScrollingFrame}); if CONSOLE_AUTO_SCROLL and ConsoleScrollingFrame.Parent then task.wait(); ConsoleScrollingFrame.CanvasPosition = Vector2.new(0, ConsoleUIListLayout.AbsoluteContentSize.Y) end; oldPrint(fullMessage) end
 _G.print = function(...) AddToConsole("PRINT", ...) end
 _G.warn = function(...) AddToConsole("WARN", ...) end
-
 -- =========================================================================
--- CORE SCRIPT LOGIC (Robot Claw Collector) - "SEARCH EVERYWHERE"
+-- =========================================================================
+-- CORE SCRIPT LOGIC (Robot Claw Collector) - CORRECTED TAG/ATTRIBUTE LOGIC
 -- =========================================================================
 local remoteEventCache = nil
 local isMinigameLogicRunning = false 
@@ -108,8 +88,13 @@ local function GetRemoteEvent()
     if remoteEventCache and remoteEventCache.Parent then return remoteEventCache end
     print("INFO", "Locating RemoteEvent...")
     local remotePathString = "ReplicatedStorage.Shared.Framework.Network.Remote.Event"
-    local success, remote = pcall(function() return ReplicatedStorage:WaitForChild("Shared",25):WaitForChild("Framework",12):WaitForChild("Network",12):WaitForChild("Remote",12):WaitForChild("Event",12) end)
-    if not success or not remote or not remote:IsA("RemoteEvent") then warn("ERROR","Failed to find RemoteEvent at",remotePathString,success and ("- Val: "..tostring(remote))or("- PcallErr: "..tostring(remote)));remoteEventCache=nil;return nil end
+    local success, remote = pcall(function()
+        return ReplicatedStorage:WaitForChild("Shared", 25):WaitForChild("Framework", 12):WaitForChild("Network", 12):WaitForChild("Remote", 12):WaitForChild("Event", 12)
+    end)
+    if not success or not remote or not remote:IsA("RemoteEvent") then 
+        warn("ERROR","Failed to find RemoteEvent at",remotePathString,success and ("- Val: "..tostring(remote))or("- PcallErr: "..tostring(remote)))
+        remoteEventCache=nil;return nil 
+    end
     print("INFO","RemoteEvent found:",remote:GetFullName());remoteEventCache=remote;return remote
 end
 
@@ -129,75 +114,84 @@ function GrabItem(itemId)
     pcall(function() remote:FireServer(unpack(args)) end)
 end
 
-function FindAllItemIDs_SearchWorkspace()
+--=========================================================================
+--  MODIFIED FIND FUNCTION - USES TAGS AND ATTRIBUTES
+--=========================================================================
+function FindAllItemIDs_Corrected()
     local itemIDs = {}
-    print("INFO", "FindAllItemIDs_SearchWorkspace: Starting WIDE search of ENTIRE Workspace...")
-    warn("PERF_WARN", "Searching ENTIRE Workspace. This can be SLOW on mobile or large games!")
+    print("INFO", "FindAllItemIDs_Corrected: Searching for items with tag ["..ITEM_TAG.."]")
+   
+    local taggedItems = CollectionService:GetTagged(ITEM_TAG)
+    print("INFO", "FindAllItemIDs_Corrected: Found", #taggedItems, "instances with tag ["..ITEM_TAG.."]")
 
-    local searchCount = 0
-    local foundCount = 0
-    local relevantClasses = { Part=true, MeshPart=true, Model=true, UnionOperation=true, Accessory=true, Tool=true }
-
-    for _, descendant in ipairs(Workspace:GetDescendants()) do
-        searchCount = searchCount + 1
-        if relevantClasses[descendant.ClassName] then
-            if type(descendant.Name) == "string" and string.len(descendant.Name) == 36 and string.find(descendant.Name, "-", 1, true) then
-                local isGuiElement = false -- Basic check to avoid our own GUI if it somehow ended up in Workspace
-                local parentCheck = descendant.Parent
-                while parentCheck do
-                    if parentCheck == CoreGui or (Players.LocalPlayer and parentCheck == Players.LocalPlayer.PlayerGui) then
-                        isGuiElement = true; break
-                    end
-                    if parentCheck == Workspace then break end -- Stop if we reach Workspace itself
-                    parentCheck = parentCheck.Parent
-                end
-                
-                if not isGuiElement then
-                    -- print("DEBUG", "FindAllItemIDs_SW: Potential item:", descendant:GetFullName(), "| Name:", descendant.Name)
-                    table.insert(itemIDs, descendant.Name)
-                    foundCount = foundCount + 1
-                end
-            end
-        end
-        if searchCount % 3000 == 0 then task.wait() end -- Yield more often if Workspace is huge
+    if #taggedItems == 0 then
+        return itemIDs -- Return empty table if no tagged items found
     end
 
-    print("INFO", "FindAllItemIDs_SearchWorkspace: Searched approx.", searchCount, "descendants. Found", foundCount, "potential item IDs.")
-    if #itemIDs == 0 and searchCount > 0 then warn("WARN", "FindAllItemIDs_SearchWorkspace: NO items matching GUID name format found in relevant classes across Workspace.")
-    elseif #itemIDs == 0 and searchCount == 0 then warn("WARN", "FindAllItemIDs_SearchWorkspace: Workspace appears empty or GetDescendants returned nothing.") end
+    for _, itemInstance in ipairs(taggedItems) do
+        local guid = itemInstance:GetAttribute(ITEM_ID_ATTRIBUTE)
+        if guid and type(guid) == "string" then
+             print("INFO", "FindAllItemIDs_Corrected: Found valid item. Instance:", itemInstance.Name, "| GUID from Attribute:", guid)
+             table.insert(itemIDs, guid)
+        else
+             warn("WARN", "FindAllItemIDs_Corrected: Tagged item ["..itemInstance.Name.."] missing or has invalid attribute ["..ITEM_ID_ATTRIBUTE.."]. Value:", tostring(guid))
+        end
+    end
+    
+    print("INFO", "FindAllItemIDs_Corrected: Total", #itemIDs, "valid item IDs identified from tagged items.")
     return itemIDs
 end
+--=========================================================================
 
 function Main() 
     if isMinigameLogicRunning then print("WARN", "Minigame logic already running."); return end
     isMinigameLogicRunning = true
-    print("ACTION", "Robot Claw Collector sequence initiated (Search Workspace Mode).")
+    print("ACTION", "Robot Claw Collector sequence initiated (Corrected Logic).")
     
     StartRobotClawInsane()
 
-    print("INFO", "Brief pause (2.5s) after minigame start command for client-side updates...")
-    wait(2.5) 
+    print("INFO", "Waiting for tagged items ["..ITEM_TAG.."] to appear (max 20s)...")
+    local startTime = tick()
+    local itemsDetected = false
+    local taggedItemsCount = 0
 
-    local itemIDsToCollect = FindAllItemIDs_SearchWorkspace() -- Use the new search function
+    repeat
+        taggedItemsCount = #CollectionService:GetTagged(ITEM_TAG)
+        if taggedItemsCount > 0 then
+             print("INFO", "WAIT_LOOP: Tagged items detected! Count:", taggedItemsCount, ". Time:", string.format("%.1fs", tick()-startTime))
+             itemsDetected = true; break
+        end
+        wait(0.25) -- Check more frequently now that we use a more efficient method
+    until tick() - startTime > 20 -- Reduced timeout, as tag check is fast
+
+    if not itemsDetected then
+        warn("WARN", "Timeout: No items with tag ["..ITEM_TAG.."] detected after 20s. Collection aborted.")
+        isMinigameLogicRunning = false; return
+    end
+    
+    print("INFO", "Items present. Pausing (1s) for full spawn...")
+    wait(1) 
+
+    local itemIDsToCollect = FindAllItemIDs_Corrected() -- Use the CORRECT search function
     
     if #itemIDsToCollect == 0 then
-        print("WARN", "No items found by Workspace search. Aborting collection.")
+        print("WARN", "No valid item IDs found by FindAllItemIDs_Corrected, though tagged items were detected initially. Check attribute names or values.")
         isMinigameLogicRunning = false; return
     end
 
-    print("ACTION", "Starting collection of", #itemIDsToCollect, "items found in Workspace...")
+    print("ACTION", "Starting collection of", #itemIDsToCollect, "items found via Tag/Attribute...")
     for i, itemID in ipairs(itemIDsToCollect) do
         if not (ScreenGui and ScreenGui.Parent and MainWindow and MainWindow.Visible) then print("INFO","GUI closed/hidden, stopping collection."); break end
         print("INFO", "Collecting item", i, "/", #itemIDsToCollect, "-", itemID)
         GrabItem(itemID)
-        wait(0.2) -- Slightly longer delay due to potential overhead of finding items everywhere
+        wait(0.15) -- Delay between grabs
     end
     print("INFO", "Collection cycle completed.")
     isMinigameLogicRunning = false
 end
 
 -- =========================================================================
--- INITIALIZATION
+-- INITIALIZATION (Same as before)
 -- =========================================================================
 local guiBuildSuccess, guiError = pcall(BuildGUI) 
 
