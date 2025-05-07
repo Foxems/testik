@@ -1,6 +1,6 @@
 --[[
-    Robot Claw Collector with Rayfield UI Console (v2 - Official Load URL)
-    Using official Rayfield loading URL: https://sirius.menu/rayfield
+    Robot Claw Collector with Venyx UI Console
+    Attempting to use Venyx UI Library.
 ]]
 
 -- Store original print/warn functions IMMEDIATELY
@@ -8,151 +8,157 @@ local _G = getfenv(0)
 local oldPrint = _G.print
 local oldWarn = _G.warn
 
-oldPrint("DEBUG: Script started. Attempting to load Rayfield UI Library from official source...")
+oldPrint("DEBUG: Script started. Attempting to load Venyx UI Library...")
 
--- === 1. LOAD RAYFIELD UI LIBRARY ===
-local Rayfield
-local rayfieldLoaded = false
-local rayfieldLoadError = ""
+-- === 1. LOAD VENYX UI LIBRARY ===
+local Venyx
+local venyxLoaded = false
+local venyxLoadError = ""
 
--- Official Rayfield loadstring from https://docs.sirius.menu/rayfield/configuration/booting-library
+-- Common Venyx loadstring
 local success, result = pcall(function()
-    Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))() -- OFFICIAL URL
+    Venyx = loadstring(game:HttpGet("https://raw.githubusercontent.com/Stefanuk12/Venyx-UI-Library/main/source.lua"))()
 end)
 
-if success and Rayfield and Rayfield.CreateWindow then
-    oldPrint("DEBUG: Rayfield loaded successfully from official source.")
-    rayfieldLoaded = true
+if success and Venyx and Venyx.Window then
+    oldPrint("DEBUG: Venyx loaded successfully.")
+    venyxLoaded = true
 else
-    rayfieldLoadError = success and "Rayfield loaded but API (CreateWindow) seems missing." or tostring(result)
-    oldPrint("ERROR: Failed to load Rayfield UI Library. Error: " .. rayfieldLoadError)
+    venyxLoadError = success and "Venyx loaded but API (Venyx.Window) seems missing." or tostring(result)
+    oldPrint("ERROR: Failed to load Venyx UI Library. Error: " .. venyxLoadError)
+    oldPrint("Stack trace: " .. debug.traceback())
     oldPrint("The script will continue using basic print for output if your executor shows it.")
     oldPrint("A GUI console will NOT be available.")
-    -- Revert to old print/warn if Rayfield fails
     _G.print = oldPrint
     _G.warn = oldWarn
 end
 
--- === 2. SETUP RAYFIELD WINDOW AND CONSOLE ELEMENTS (if loaded) ===
-local Window, ConsoleTab
-local consoleLogLines = {} 
-local MAX_CONSOLE_LOG_LINES = 100
-local consoleOutputLabel = nil 
+-- === 2. SETUP VENYX WINDOW AND CONSOLE ELEMENTS (if loaded) ===
+local MainWindow, ConsoleTab
+local consoleLogLinesVenyx = {}
+local MAX_CONSOLE_LOG_LINES_VENYX = 100
+local consoleOutputLabelVenyx = nil -- This will be our "text area" in Venyx
 
-if rayfieldLoaded then
-    local themeSuccess, themeErr = pcall(function()
-        -- Rayfield usually defaults to a dark theme, explicit setting is optional.
-        -- Rayfield:SetTheme("Dark") 
-
-        Window = Rayfield:CreateWindow({
-            Name = "Robot Claw Collector",
-            LoadingTitle = "Collector Initializing",
-            LoadingSubtitle = "by YourName & AI",
-            ConfigurationSaving = { Enabled = false }, -- No settings to save
-            KeySystem = false -- No key system
+if venyxLoaded then
+    local venyxSetupSuccess, venyxSetupErr = pcall(function()
+        MainWindow = Venyx.Window({
+            Title = "Robot Claw Collector (Venyx)",
+            Color = Color3.fromRGB(30, 30, 30), -- Main window color
+            Draggable = true,
+            ShowMinimize = true,
+            ShowClose = true, -- Venyx handles its own close button
+            Size = UDim2.new(0, 500, 0, 350)
         })
-        oldPrint("DEBUG: Rayfield Window created.")
+        oldPrint("DEBUG: Venyx Window created.")
 
-        ConsoleTab = Window:CreateTab({ Name = "Console Output" })
-        oldPrint("DEBUG: Rayfield ConsoleTab created.")
+        ConsoleTab = MainWindow:Tab({ Name = "Console Output" })
+        oldPrint("DEBUG: Venyx ConsoleTab created.")
 
-        local ConsoleSection = ConsoleTab:CreateSection({ Name = "Log Output" }) -- Changed section name for clarity
-        oldPrint("DEBUG: Rayfield ConsoleSection created.")
-
-        consoleOutputLabel = ConsoleSection:CreateLabel({ Text = "Console Initializing..." }) -- Will be updated
-        oldPrint("DEBUG: Rayfield consoleOutputLabel created.")
+        -- Venyx doesn't have a multi-line text box for logs. We'll use a label and update it.
+        -- It's better to create individual labels for each line for better performance with Venyx if many lines.
+        -- However, for simplicity and to match the previous approach, we'll try a single updating label first.
+        -- If performance is an issue, this part would need to be refactored to create many small labels.
         
-        ConsoleSection:CreateButton({
-            Name = "Clear Console",
+        ConsoleTab:Label({Text = "Log Output:", Font = {Size = 16}}) -- Section title
+        consoleOutputLabelVenyx = ConsoleTab:Label({ Text = "Console Initializing...", Font = {Size = 12} })
+        oldPrint("DEBUG: Venyx consoleOutputLabel created.")
+
+        ConsoleTab:Button({
+            Text = "Clear Console",
             Callback = function()
-                consoleLogLines = {"[Console Cleared by User]"}
-                if consoleOutputLabel then
-                    consoleOutputLabel:SetText(table.concat(consoleLogLines, "\n"))
+                consoleLogLinesVenyx = {"[Console Cleared by User]"}
+                if consoleOutputLabelVenyx then
+                    consoleOutputLabelVenyx:SetText(table.concat(consoleLogLinesVenyx, "\n"))
                 end
-            end
+            end,
+            Color = Color3.fromRGB(50,50,50)
         })
 
-        ConsoleSection:CreateButton({
-            Name = "Copy Log to Clipboard",
+        ConsoleTab:Button({
+            Text = "Copy Log to Clipboard",
             Callback = function()
-                local fullLog = table.concat(consoleLogLines, "\n")
+                local fullLog = table.concat(consoleLogLinesVenyx, "\n")
                 local clipboardFunc = _G.setclipboard or (_G.game and _G.game.SetClipboard)
                 if clipboardFunc then
-                    local copySuccess, copyErr = pcall(clipboardFunc, fullLog)
-                    if copySuccess then
-                         _G.print("[Rayfield Console] Log copied to clipboard.")
+                    local copySuccessCb, copyErrCb = pcall(clipboardFunc, fullLog)
+                    if copySuccessCb then
+                         _G.print("[Venyx Console] Log copied to clipboard.")
                     else
-                        _G.warn("[Rayfield Console] Error copying to clipboard: " .. tostring(copyErr))
+                        _G.warn("[Venyx Console] Error copying to clipboard: " .. tostring(copyErrCb))
                     end
                 else
-                    _G.warn("[Rayfield Console] Clipboard function not available.")
+                    _G.warn("[Venyx Console] Clipboard function not available.")
                 end
-            end
+            end,
+            Color = Color3.fromRGB(50,50,50)
         })
-        oldPrint("DEBUG: Rayfield console buttons created.")
+        oldPrint("DEBUG: Venyx console buttons created.")
 
     end)
-    if not themeSuccess then
-        oldPrint("ERROR initializing Rayfield Window/Theme: " .. tostring(themeErr))
+
+    if not venyxSetupSuccess then
+        oldPrint("ERROR initializing Venyx Window/Elements: " .. tostring(venyxSetupErr))
         oldPrint("Stack: " .. debug.traceback())
-        rayfieldLoaded = false 
+        venyxLoaded = false
         _G.print = oldPrint
         _G.warn = oldWarn
     else
-        oldPrint("DEBUG: Rayfield UI setup appears successful.")
+        oldPrint("DEBUG: Venyx UI setup appears successful.")
     end
 end
 
--- === 3. HOOK PRINT AND WARN TO USE RAYFIELD CONSOLE ===
-local function updateRayfieldConsole()
-    if rayfieldLoaded and consoleOutputLabel and Window and Window.Visible then
+-- === 3. HOOK PRINT AND WARN TO USE VENYX CONSOLE ===
+local function updateVenyxConsole()
+    if venyxLoaded and consoleOutputLabelVenyx and MainWindow and MainWindow.Enabled then -- Check if window is enabled/visible
         local displayLines = {}
-        local startIndex = math.max(1, #consoleLogLines - MAX_CONSOLE_LOG_LINES + 1)
-        for i = startIndex, #consoleLogLines do
-            table.insert(displayLines, consoleLogLines[i])
+        local startIndex = math.max(1, #consoleLogLinesVenyx - MAX_CONSOLE_LOG_LINES_VENYX + 1)
+        for i = startIndex, #consoleLogLinesVenyx do
+            table.insert(displayLines, consoleLogLinesVenyx[i])
         end
-        -- Use pcall for SetText as it can error if the label is destroyed or invalid
+        
         local setSuccess, setErr = pcall(function()
-            consoleOutputLabel:SetText(table.concat(displayLines, "\n"))
+            consoleOutputLabelVenyx:SetText(table.concat(displayLines, "\n"))
         end)
         if not setSuccess then
-            oldPrint("ERROR updating Rayfield label: " .. tostring(setErr))
+            oldPrint("ERROR updating Venyx label: " .. tostring(setErr))
         end
     end
 end
 
-if rayfieldLoaded then
+if venyxLoaded then
     _G.print = function(...)
         local args = {...}
         local message = table.concat(args, "\t")
-        oldPrint(message) 
+        oldPrint(message)
 
-        table.insert(consoleLogLines, "[P] " .. message)
-        if #consoleLogLines > (MAX_CONSOLE_LOG_LINES + 20) then 
-            table.remove(consoleLogLines, 1)
+        table.insert(consoleLogLinesVenyx, "[P] " .. message)
+        if #consoleLogLinesVenyx > (MAX_CONSOLE_LOG_LINES_VENYX + 20) then
+            table.remove(consoleLogLinesVenyx, 1)
         end
-        updateRayfieldConsole()
+        updateVenyxConsole()
     end
 
     _G.warn = function(...)
         local args = {...}
         local message = table.concat(args, "\t")
-        oldWarn(message) 
+        oldWarn(message)
 
-        table.insert(consoleLogLines, "<font color='rgb(255,200,0)'>[W] " .. message:gsub("<","<"):gsub(">",">") .. "</font>")
-        if #consoleLogLines > (MAX_CONSOLE_LOG_LINES + 20) then
-            table.remove(consoleLogLines, 1)
+        -- Venyx labels might not directly support RichText like Rayfield, so we'll just prefix.
+        -- For colored text, Venyx might require specific HTML-like tags if supported, or separate colored labels.
+        table.insert(consoleLogLinesVenyx, "[W] " .. message)
+        if #consoleLogLinesVenyx > (MAX_CONSOLE_LOG_LINES_VENYX + 20) then
+            table.remove(consoleLogLinesVenyx, 1)
         end
-        updateRayfieldConsole()
+        updateVenyxConsole()
     end
-    print("Rayfield Console (v2) ready. Subsequent prints/warns will appear here.") -- This will use the new print
+    print("Venyx Console ready. Subsequent prints/warns will appear here.")
 else
-    print("Rayfield not loaded or failed to init window. Using fallback print for all output.") -- This uses oldPrint if Rayfield failed
+    print("Venyx not loaded or failed to init window. Using fallback print for all output.")
 end
 
 
 -- === YOUR CORE SCRIPT LOGIC STARTS HERE ===
-print("DEBUG: Main script logic starting now...") 
+print("DEBUG: Main script logic starting now...")
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -178,7 +184,7 @@ function GrabItem(itemId, remoteEventInstance)
         return
     end
     local args = { "GrabMinigameItem", itemId }
-    pcall(function() remoteEventInstance:FireServer(unpack(args)) end) -- Fire and forget, error handled by game if critical
+    pcall(function() remoteEventInstance:FireServer(unpack(args)) end)
 end
 
 function FindAllItemIDs()
@@ -209,8 +215,6 @@ function FindAllItemIDs()
         if string.len(itemInstance.Name) == 36 and string.find(itemInstance.Name, "-", 1, true) then 
             print("[FindAllItemIDs] ---> Found potential item ID (by name):", itemInstance.Name)
             table.insert(itemIDs, itemInstance.Name)
-        else
-            -- print("[FindAllItemIDs] ---> Name '" .. itemInstance.Name .. "' does not match ID format (length 36 and hyphen), ignoring.")
         end
     end
 
