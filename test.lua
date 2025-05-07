@@ -1,300 +1,145 @@
 --[[
-    Skript pro Robot Claw Minigame s VYLEPŠENOU GUI konzolí v3
-    Cílem je opravit drag a zajistit spuštění minihry.
+    Robot Claw Collector with Rayfield UI Console
+    PLEASE ENSURE YOUR EXECUTOR CAN RUN HttpGet AND LOAD RAYFIELD.
 ]]
 
 -- Store original print/warn functions IMMEDIATELY
-local _G = getfenv(0) -- Get global environment
+local _G = getfenv(0)
 local oldPrint = _G.print
 local oldWarn = _G.warn
 
-oldPrint("DEBUG: Script execution started. Original print/warn captured.")
+oldPrint("DEBUG: Script started. Attempting to load Rayfield UI Library...")
 
--- Nastavení pro GUI Konzoli
-local MAX_CONSOLE_LINES = 70
-local CONSOLE_VISIBLE_BY_DEFAULT = true
+-- === 1. LOAD RAYFIELD UI LIBRARY ===
+local Rayfield
+local rayfieldLoaded = false
+local rayfieldLoadError = ""
 
--- === SEKCIE GUI KONZOLE ===
-local Players = game:GetService("Players")
-local CoreGui = game:GetService("CoreGui")
-local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
-
-local consoleScreenGui = nil
-local consoleFrame = nil
-local scrollingFrame = nil
-local uiListLayout = nil -- Reference for scrolling
-
-local guiInitializationSuccess = false
-
--- Wrap GUI creation in pcall
-local success, err = pcall(function()
-    oldPrint("DEBUG: Attempting to initialize GUI console...")
-
-    local existingConsole = CoreGui:FindFirstChild("InGameConsoleAI_v3")
-    if existingConsole then existingConsole:Destroy() end
-
-    consoleScreenGui = Instance.new("ScreenGui")
-    consoleScreenGui.Name = "InGameConsoleAI_v3"
-    consoleScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    consoleScreenGui.ResetOnSpawn = false
-    consoleScreenGui.Parent = CoreGui
-    oldPrint("DEBUG: ScreenGui created.")
-
-    consoleFrame = Instance.new("Frame")
-    consoleFrame.Name = "ConsoleFrame"
-    consoleFrame.Size = UDim2.new(0.6, 0, 0.45, 0)
-    consoleFrame.Position = UDim2.new(0.02, 0, 0.02, 0)
-    consoleFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-    consoleFrame.BackgroundTransparency = 0.1
-    consoleFrame.BorderSizePixel = 1
-    consoleFrame.BorderColor3 = Color3.fromRGB(70, 70, 70)
-    consoleFrame.Active = true -- ESSENTIAL for input detection on itself or children
-    consoleFrame.Draggable = false -- Using custom drag
-    consoleFrame.Visible = CONSOLE_VISIBLE_BY_DEFAULT
-    consoleFrame.Parent = consoleScreenGui
-    oldPrint("DEBUG: ConsoleFrame created. Active:", consoleFrame.Active)
-
-    local consoleTitleBar = Instance.new("Frame")
-    consoleTitleBar.Name = "TitleBar"
-    consoleTitleBar.Size = UDim2.new(1, 0, 0, 30)
-    consoleTitleBar.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-    consoleTitleBar.BorderSizePixel = 0
-    consoleTitleBar.Active = true -- ESSENTIAL for input detection for dragging
-    consoleTitleBar.Parent = consoleFrame
-    oldPrint("DEBUG: TitleBar created. Active:", consoleTitleBar.Active)
-
-    local consoleTitle = Instance.new("TextLabel")
-    consoleTitle.Name = "Title"
-    consoleTitle.Size = UDim2.new(0.5, 0, 1, 0)
-    consoleTitle.Position = UDim2.new(0.02, 0, 0, 0)
-    consoleTitle.BackgroundTransparency = 1
-    consoleTitle.Font = Enum.Font.SourceSansSemibold
-    consoleTitle.Text = "Script Output v3"
-    consoleTitle.TextColor3 = Color3.fromRGB(210, 210, 210)
-    consoleTitle.TextSize = 16
-    consoleTitle.TextXAlignment = Enum.TextXAlignment.Left
-    consoleTitle.Parent = consoleTitleBar
-
-    local buttonSize = UDim2.new(0, 40, 0.8, 0)
-    local buttonSpacing = 7
-
-    local toggleButton = Instance.new("TextButton")
-    toggleButton.Name = "ToggleButton"
-    toggleButton.Size = buttonSize
-    toggleButton.AnchorPoint = Vector2.new(1, 0.5)
-    toggleButton.Position = UDim2.new(1, -buttonSpacing, 0.5, 0)
-    toggleButton.BackgroundColor3 = Color3.fromRGB(60,60,60)
-    toggleButton.Text = "–"
-    toggleButton.ToolTip = "Hide/Show Console"
-    toggleButton.TextColor3 = Color3.fromRGB(230,230,230)
-    toggleButton.Font = Enum.Font.SourceSansBold
-    toggleButton.TextSize = 20
-    toggleButton.Parent = consoleTitleBar
-    toggleButton.MouseButton1Click:Connect(function()
-        consoleFrame.Visible = not consoleFrame.Visible
-    end)
-
-    local clearButton = Instance.new("TextButton")
-    clearButton.Name = "ClearButton"
-    clearButton.Size = buttonSize
-    clearButton.AnchorPoint = Vector2.new(1, 0.5)
-    clearButton.Position = UDim2.new(1, -(buttonSize.X.Offset + buttonSpacing * 2), 0.5, 0)
-    clearButton.BackgroundColor3 = Color3.fromRGB(60,60,60)
-    clearButton.Text = "Clr"
-    clearButton.ToolTip = "Clear Console"
-    clearButton.TextColor3 = Color3.fromRGB(230,230,230)
-    clearButton.Font = Enum.Font.SourceSansBold
-    clearButton.TextSize = 16
-    clearButton.Parent = consoleTitleBar
-
-    local copyButton = Instance.new("TextButton")
-    copyButton.Name = "CopyButton"
-    copyButton.Size = UDim2.new(0, 50, 0.8, 0)
-    copyButton.AnchorPoint = Vector2.new(1, 0.5)
-    copyButton.Position = UDim2.new(1, -(buttonSize.X.Offset * 2 + buttonSpacing * 3 + (copyButton.Size.X.Offset - buttonSize.X.Offset)/2 + 5), 0.5, 0)
-    copyButton.BackgroundColor3 = Color3.fromRGB(60,60,60)
-    copyButton.Text = "Copy"
-    copyButton.ToolTip = "Copy All to Clipboard"
-    copyButton.TextColor3 = Color3.fromRGB(230,230,230)
-    copyButton.Font = Enum.Font.SourceSansBold
-    copyButton.TextSize = 16
-    copyButton.Parent = consoleTitleBar
-    oldPrint("DEBUG: Buttons created.")
-
-    scrollingFrame = Instance.new("ScrollingFrame")
-    scrollingFrame.Name = "Log"
-    scrollingFrame.Size = UDim2.new(1, 0, 1, -consoleTitleBar.Size.Y.Offset)
-    scrollingFrame.Position = UDim2.new(0, 0, 0, consoleTitleBar.Size.Y.Offset)
-    scrollingFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-    scrollingFrame.BackgroundTransparency = 0
-    scrollingFrame.BorderSizePixel = 0
-    scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-    scrollingFrame.ScrollBarThickness = 10
-    scrollingFrame.ScrollingEnabled = true
-    scrollingFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    scrollingFrame.Parent = consoleFrame
-
-    uiListLayout = Instance.new("UIListLayout") -- Assign to the upvalue
-    uiListLayout.Parent = scrollingFrame
-    uiListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    uiListLayout.Padding = UDim.new(0, 3)
-    uiListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-    uiListLayout.FillDirection = Enum.FillDirection.Vertical
-    oldPrint("DEBUG: ScrollingFrame and UIListLayout created.")
-
-    clearButton.MouseButton1Click:Connect(function()
-        for _, child in ipairs(scrollingFrame:GetChildren()) do
-            if child:IsA("TextLabel") then
-                child:Destroy()
-            end
-        end
-        scrollingFrame.CanvasPosition = Vector2.new(0,0)
-    end)
-
-    copyButton.MouseButton1Click:Connect(function()
-        local allText = {}
-        for _, child in ipairs(scrollingFrame:GetChildren()) do
-            if child:IsA("TextLabel") then
-                table.insert(allText, child.Text)
-            end
-        end
-        local fullLog = table.concat(allText, "\n")
-        
-        local clipboardFunc = _G.setclipboard or (_G.game and _G.game.SetClipboard)
-        if clipboardFunc then
-            pcall(clipboardFunc, fullLog)
-            _G.print("[GUI Console] Log zkopírován do schránky.") -- Use new print
-        else
-            _G.warn("[GUI Console] Funkce pro kopírování do schránky není dostupná.") -- Use new warn
-        end
-    end)
-
-    -- Vlastní logika pro přetahování (Draggable)
-    local dragging = false
-    local dragStartMousePos = nil
-    local frameStartPos = nil
-
-    consoleTitleBar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            oldPrint("DEBUG: Drag InputBegan")
-            dragging = true
-            dragStartMousePos = input.Position
-            frameStartPos = consoleFrame.Position
-            
-            local connChanged
-            connChanged = input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                    oldPrint("DEBUG: Drag InputEnded (via changed)")
-                    if connChanged then connChanged:Disconnect() end
-                end
-            end)
-        end
-    end)
-
-    consoleTitleBar.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            if dragging then -- Only if it was already dragging (safety)
-                 dragging = false
-                 oldPrint("DEBUG: Drag InputEnded (direct)")
-            end
-        end
-    end)
-    
-    -- Use RenderStepped for smoother dragging, but ensure it only runs when dragging
-    RunService.RenderStepped:Connect(function()
-        if dragging and dragStartMousePos and frameStartPos then
-            local currentMousePos = UserInputService:GetMouseLocation() -- More reliable for continuous drag
-            if UserInputService.TouchEnabled and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) == false then
-                 -- For touch, rely on InputEnded mostly. This is a fallback if finger lifted without InputEnded firing for titlebar.
-                 -- However, GetMouseLocation might not be ideal for touch.
-                 -- For simplicity now, let's assume touch drag ends mostly with InputEnded on the titlebar.
-                 -- If touch drag is problematic, we might need specific touch event handling.
-            end
-            local delta = currentMousePos - dragStartMousePos
-            consoleFrame.Position = UDim2.new(frameStartPos.X.Scale, frameStartPos.X.Offset + delta.X,
-                                              frameStartPos.Y.Scale, frameStartPos.Y.Offset + delta.Y)
-        end
-    end)
-    oldPrint("DEBUG: Drag logic connected.")
-    guiInitializationSuccess = true
+-- Common Rayfield loadstring (ensure this link is active and your executor supports it)
+local success, result = pcall(function()
+    Rayfield = loadstring(game:HttpGet('https://raw.githubusercontent.com/shlexware/Rayfield/main/source'))()
 end)
 
-if not success then
-    oldPrint("FATAL ERROR INITIALIZING GUI CONSOLE:", err)
-    oldPrint("Stack trace:", debug.traceback())
-end
-
--- Přepsání globálních funkcí print a warn
-local function AddToConsole(messageType, ...)
-    if not guiInitializationSuccess or not consoleScreenGui or not consoleScreenGui.Parent or not scrollingFrame or not scrollingFrame.Parent then
-        -- Fallback to oldPrint if GUI isn't ready or got destroyed
-        local args = {...}
-        local messageParts = {}
-        for i = 1, #args do table.insert(messageParts, tostring(args[i])) end
-        oldPrint((messageType == "WARN" and "[WARN_FALLBACK] " or "[PRINT_FALLBACK] ") .. table.concat(messageParts, "\t"))
-        return
-    end
-
-    local args = {...}
-    local messageParts = {}
-    for i = 1, #args do table.insert(messageParts, tostring(args[i])) end
-    local fullMessage = table.concat(messageParts, "\t")
-
-    -- Also call original print/warn for other potential listeners (e.g. exploit console)
-    if messageType == "PRINT" then oldPrint(fullMessage)
-    elseif messageType == "WARN" then oldWarn(fullMessage) end
-
-    local textLabel = Instance.new("TextLabel")
-    textLabel.Name = "LogEntry"
-    textLabel.BackgroundTransparency = 1
-    textLabel.Size = UDim2.new(1, -scrollingFrame.ScrollBarThickness - 5, 0, 0)
-    textLabel.AutomaticSize = Enum.AutomaticSize.Y
-    textLabel.Font = Enum.Font.Code
-    textLabel.TextSize = 14
-    textLabel.TextXAlignment = Enum.TextXAlignment.Left
-    textLabel.TextYAlignment = Enum.TextYAlignment.Top
-    textLabel.TextWrapped = true
-    textLabel.RichText = true
-    
-    local prefix = ""
-    if messageType == "WARN" then
-        textLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
-        prefix = "<font color='#FFC800'>[WARN]</font> "
-    else
-        textLabel.TextColor3 = Color3.fromRGB(225, 225, 225)
-    end
-    textLabel.Text = prefix .. fullMessage:gsub("<", "<"):gsub(">", ">")
-    textLabel.Parent = scrollingFrame
-
-    while #scrollingFrame:GetChildren() > MAX_CONSOLE_LINES + 1 do
-        local childToRemove = scrollingFrame:GetChildren()[1]
-        if childToRemove ~= uiListLayout then childToRemove:Destroy()
-        elseif #scrollingFrame:GetChildren() > 1 then scrollingFrame:GetChildren()[2]:Destroy() end
-    end
-    
-    task.wait()
-    if scrollingFrame and uiListLayout and scrollingFrame.CanvasSize.Y.Offset > scrollingFrame.AbsoluteSize.Y then
-        scrollingFrame.CanvasPosition = Vector2.new(0, uiListLayout.AbsoluteContentSize.Y) -- Prefer AbsoluteContentSize for more accuracy
-    end
-end
-
-if guiInitializationSuccess then
-    _G.print = function(...) AddToConsole("PRINT", ...) end
-    _G.warn = function(...) AddToConsole("WARN", ...) end
-    print("GUI Console v3 initialized. New print/warn active.")
-    print("Testing console with a few lines...")
-    for i=1, 3 do print("Test line for scrolling #" .. i) end
+if success and Rayfield and Rayfield.CreateWindow then
+    oldPrint("DEBUG: Rayfield loaded successfully.")
+    rayfieldLoaded = true
 else
-    oldPrint("GUI Console v3 FAILED to initialize. Using fallback print/warn.")
-    _G.print = oldPrint -- Revert to old if GUI failed
+    rayfieldLoadError = success and "Rayfield loaded but API seems missing." or tostring(result)
+    oldPrint("ERROR: Failed to load Rayfield UI Library. Error: " .. rayfieldLoadError)
+    oldPrint("The script will continue using basic print for output if your executor shows it.")
+    oldPrint("A GUI console will NOT be available.")
+    -- Revert to old print/warn if Rayfield fails
+    _G.print = oldPrint
     _G.warn = oldWarn
 end
 
+-- === 2. SETUP RAYFIELD WINDOW AND CONSOLE ELEMENTS (if loaded) ===
+local Window, ConsoleTab
+local consoleLogLines = {} -- Store lines of text for the console
+local MAX_CONSOLE_LOG_LINES = 100 -- Max lines to keep in our Rayfield display
+local consoleOutputLabel = nil -- This will be our "text area"
 
--- === TVŮJ PŮVODNÍ SKRIPT ZAČÍNÁ ZDE ===
-print("DEBUG: Main script logic starting now...")
+if rayfieldLoaded then
+    local themeSuccess, themeErr = pcall(function()
+        -- Attempt to set a theme if desired (optional)
+        Rayfield:SetTheme("Dark") -- Or other themes like "Bloody", "Midnight", etc.
+        
+        Window = Rayfield:CreateWindow({
+            Name = "Robot Claw Collector",
+            LoadingTitle = "Collector Initializing",
+            LoadingSubtitle = "by YourName & AI",
+            ConfigurationSaving = {
+                Enabled = false, -- No settings to save for this simple script
+            },
+            KeySystem = false -- No key system needed
+        })
+
+        ConsoleTab = Window:CreateTab({ Name = "Console Output" })
+
+        local ConsoleSection = ConsoleTab:CreateSection({ Name = "Log" })
+
+        -- Rayfield doesn't have a simple "LogBox". We'll use a label and update it.
+        -- Create an initial dummy label that we'll update.
+        consoleOutputLabel = ConsoleSection:CreateLabel({ Text = "Console Initializing..." })
+        
+        ConsoleSection:CreateButton({
+            Name = "Clear Console",
+            Callback = function()
+                consoleLogLines = {"[Console Cleared]"}
+                if consoleOutputLabel then
+                    consoleOutputLabel:SetText(table.concat(consoleLogLines, "\n"))
+                end
+            end
+        })
+
+        ConsoleSection:CreateButton({
+            Name = "Copy Log to Clipboard",
+            Callback = function()
+                local fullLog = table.concat(consoleLogLines, "\n")
+                local clipboardFunc = _G.setclipboard or (_G.game and _G.game.SetClipboard)
+                if clipboardFunc then
+                    pcall(clipboardFunc, fullLog)
+                    _G.print("[Rayfield Console] Log copied to clipboard.") -- Use hooked print
+                else
+                    _G.warn("[Rayfield Console] Clipboard function not available.") -- Use hooked warn
+                end
+            end
+        })
+    end)
+    if not themeSuccess then
+        oldPrint("ERROR initializing Rayfield Window/Theme: " .. tostring(themeErr))
+        oldPrint("Stack: " .. debug.traceback())
+        rayfieldLoaded = false -- Treat as failed if window setup fails
+        _G.print = oldPrint
+        _G.warn = oldWarn
+    end
+end
+
+-- === 3. HOOK PRINT AND WARN TO USE RAYFIELD CONSOLE ===
+local function updateRayfieldConsole()
+    if rayfieldLoaded and consoleOutputLabel and Window and Window.Visible then
+        -- Limit the number of lines displayed directly in the label to avoid performance issues
+        local displayLines = {}
+        local startIndex = math.max(1, #consoleLogLines - MAX_CONSOLE_LOG_LINES + 1)
+        for i = startIndex, #consoleLogLines do
+            table.insert(displayLines, consoleLogLines[i])
+        end
+        consoleOutputLabel:SetText(table.concat(displayLines, "\n"))
+    end
+end
+
+if rayfieldLoaded then
+    _G.print = function(...)
+        local args = {...}
+        local message = table.concat(args, "\t")
+        oldPrint(message) -- Keep original print for executor's console
+
+        table.insert(consoleLogLines, "[P] " .. message)
+        if #consoleLogLines > (MAX_CONSOLE_LOG_LINES + 20) then -- Keep a bit more in memory than displayed
+            table.remove(consoleLogLines, 1)
+        end
+        updateRayfieldConsole()
+    end
+
+    _G.warn = function(...)
+        local args = {...}
+        local message = table.concat(args, "\t")
+        oldWarn(message) -- Keep original warn
+
+        table.insert(consoleLogLines, "<font color='rgb(255,200,0)'>[W] " .. message .. "</font>") -- Rayfield labels support RichText
+        if #consoleLogLines > (MAX_CONSOLE_LOG_LINES + 20) then
+            table.remove(consoleLogLines, 1)
+        end
+        updateRayfieldConsole()
+    end
+    print("Rayfield Console ready. Subsequent prints will appear here.")
+else
+    print("Rayfield not loaded or failed to init window. Using fallback print.")
+end
+
+
+-- === YOUR CORE SCRIPT LOGIC STARTS HERE ===
+print("DEBUG: Main script logic starting now...") -- This should go to Rayfield or fallback
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -361,7 +206,7 @@ function Main()
     print("[Main] Hlavní funkce Main() spuštěna.")
     print("[Main] Ověřuji RemoteEvent...")
     local remote = nil
-    local remotePathString = "ReplicatedStorage.Shared.Framework.Network.Remote.Event" -- For logging
+    local remotePathString = "ReplicatedStorage.Shared.Framework.Network.Remote.Event"
     
     local findRemoteSuccess, remoteEventInstanceOrError = pcall(function()
         return ReplicatedStorage:WaitForChild("Shared", 30):WaitForChild("Framework", 15):WaitForChild("Network", 15):WaitForChild("Remote", 15):WaitForChild("Event", 15)
