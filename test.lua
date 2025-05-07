@@ -1,8 +1,8 @@
 --[[
-    Robot Claw Collector - vHookAttempt - Custom UI & HOOK Logic
-    ATTEMPTS to hook FireServer to grab all items before finishing.
-    *** THIS IS EXPERIMENTAL, UNTESTED, AND RISKY ***
-    Based on game script analysis and bypass concepts.
+    Robot Claw Collector - vCorrected_Final - Custom UI & CORRECT Logic
+    Finds items via Tag/Attribute. Attempts to collect all found items rapidly.
+    Server limitations may prevent receiving more than one item per session.
+    This version sends collection requests as fast as reasonably possible.
 ]]
 
 -- Store original print/warn functions IMMEDIATELY
@@ -10,7 +10,7 @@ local _G = getfenv(0)
 local oldPrint = _G.print
 local oldWarn = _G.warn
 
-oldPrint("DEBUG: Script initiated. Hook Attempt Logic. Version: HookAttempt_1")
+oldPrint("DEBUG: Script initiated. Corrected Logic (Rapid Fire). Version: Corrected_Final_Rapid")
 
 -- Services
 local CoreGui = game:GetService("CoreGui")
@@ -22,17 +22,18 @@ local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService") 
 
 -- Script Configuration
-local SCRIPT_TITLE = "Claw Collector Pro (Hook)" 
+local SCRIPT_TITLE = "Claw Collector Pro (Rapid)" 
 local MAX_CONSOLE_LINES = 120 
 local CONSOLE_AUTO_SCROLL = true
 local WINDOW_INITIAL_VISIBLE = true
-local ITEM_TAG = "ClawToyModel"      
+local ITEM_TAG = "ClawToyModel"       
 local ITEM_ID_ATTRIBUTE = "ItemGUID" 
+local GRAB_DELAY = 0.05 -- Minimal delay between grab requests (task.wait() essentially)
 
--- GUI Instance Storage / Theme / GUI Creation Functions (Assume identical to previous versions)
+-- GUI Instance Storage / Theme / GUI Creation Functions (Identical to previous working GUI version)
 local ScreenGui, MainWindow, TitleBar, TitleLabel, SidebarFrame, ContentFrame, Tabs, CurrentTabContent, ConsoleScrollingFrame, ConsoleUIListLayout, consoleLogLines
 local THEME = { Background = Color3.fromRGB(35, 38, 46), Sidebar = Color3.fromRGB(28, 30, 37), Content = Color3.fromRGB(35, 38, 46), TitleBar = Color3.fromRGB(22, 24, 29), TextPrimary = Color3.fromRGB(220, 221, 222), TextSecondary = Color3.fromRGB(150, 152, 158), Accent = Color3.fromRGB(88, 101, 242), AccentHover = Color3.fromRGB(71, 82, 196), Button = Color3.fromRGB(54, 57, 66), ButtonHover = Color3.fromRGB(64, 68, 78), InputBorder = Color3.fromRGB(20, 20, 20), ActiveTabButton = Color3.fromRGB(45, 48, 56), Font = Enum.Font.GothamSemibold, FontSecondary = Enum.Font.Gotham, FontSize = 14, FontSizeSmall = 12, FontSizeTitle = 16, }
-local AddToConsole -- Forward declare
+local AddToConsole 
 local function CreateElement(className, properties) local element = Instance.new(className); for prop, value in pairs(properties or {}) do element[prop] = value end; return element end
 local function SelectTab(tabData) if CurrentTabContent then CurrentTabContent.Visible = false end; for _, t in ipairs(Tabs) do t.button.BackgroundColor3 = (t == tabData) and THEME.ActiveTabButton or THEME.Sidebar; t.button.TextColor3 = (t == tabData) and THEME.Accent or THEME.TextPrimary end; tabData.content.Visible = true; CurrentTabContent = tabData.content end
 local function CreateSidebarButton(text, order, parent) local b = CreateElement("TextButton", {Name=text.."TabButton",Text="  "..text,TextColor3=THEME.TextPrimary,Font=THEME.Font,TextSize=THEME.FontSize,TextXAlignment=Enum.TextXAlignment.Left,BackgroundColor3=THEME.Sidebar,BorderSizePixel=0,Size=UDim2.new(1,0,0,40),LayoutOrder=order,Parent=parent}); b.MouseEnter:Connect(function()if Tabs[order].content~=CurrentTabContent then b.BackgroundColor3=THEME.ButtonHover end end);b.MouseLeave:Connect(function()if Tabs[order].content~=CurrentTabContent then b.BackgroundColor3=THEME.Sidebar end end);return b end
@@ -46,203 +47,66 @@ AddToConsole = function(type, ...) if not ConsoleScrollingFrame or not ConsoleSc
 _G.print = function(...) AddToConsole("PRINT", ...) end
 _G.warn = function(...) AddToConsole("WARN", ...) end
 -- =========================================================================
--- HOOK FUNCTIONALITY (EXPERIMENTAL)
+-- CORE SCRIPT LOGIC (Robot Claw Collector) - Corrected Logic / Rapid Fire
 -- =========================================================================
 local remoteEventCache = nil
-local originalFireServer = nil
-local remoteEventInstance = nil -- Store the actual RemoteEvent instance
-local shouldFireAllItems = false -- Flag to indicate the hook should fire grab events
-
-local function FindAllItemIDs_Corrected_Internal() -- Internal version for hook
-    local itemIDs = {}
-    local taggedItems = CollectionService:GetTagged(ITEM_TAG)
-    if #taggedItems == 0 then return itemIDs end
-    for _, itemInstance in ipairs(taggedItems) do
-        local guid = itemInstance:GetAttribute(ITEM_ID_ATTRIBUTE)
-        if guid and type(guid) == "string" then table.insert(itemIDs, guid) end 
-    end
-    return itemIDs
-end
-
-local function HookRemoteEvent()
-    print("INFO", "Attempting to find and hook RemoteEvent:FireServer...")
-    
-    local remote = GetRemoteEvent() -- Use existing function to find it
-    if not remote then 
-        warn("ERROR", "HookRemoteEvent: Could not find RemoteEvent. Hook failed.")
-        return false 
-    end 
-    remoteEventInstance = remote -- Store the found instance
-
-    -- Ensure hookfunction and newcclosure are available (exploit dependent)
-    if not hookfunction or not newcclosure then
-        warn("ERROR", "HookRemoteEvent: 'hookfunction' or 'newcclosure' not found in environment. Cannot apply hook.")
-        remoteEventInstance = nil -- Reset if hook fails
-        return false
-    end
-    
-    -- Clone the function to keep the original (using clonefunction if available, otherwise just reference)
-    originalFireServer = clonefunction and clonefunction(remote.FireServer) or remote.FireServer
-    
-    -- Apply the hook
-    local hookSuccess, hookError = pcall(function()
-        hookfunction(remote.FireServer, newcclosure(function(self, ...) -- Hook the actual method
-            local args = {...}
-            local eventName = args[1]
-
-            -- Check if the call is to finish the minigame AND our flag is set
-            if eventName == "FinishMinigame" and shouldFireAllItems then
-                print("HOOK", "Intercepted 'FinishMinigame' call!")
-                shouldFireAllItems = false -- Reset flag immediately
-
-                local itemsToGrab = FindAllItemIDs_Corrected_Internal()
-                print("HOOK", "Found", #itemsToGrab, "items via internal check. Firing GrabMinigameItem for each...")
-                
-                if #itemsToGrab > 0 then
-                    for i, itemId in ipairs(itemsToGrab) do
-                        print("HOOK", "Firing GrabMinigameItem for:", itemId)
-                        -- IMPORTANT: Call the ORIGINAL FireServer using the stored remote instance
-                        -- Do not cause infinite recursion by calling the hooked version!
-                        local grabArgs = {"GrabMinigameItem", itemId}
-                        local grabSuccess, grabErr = pcall(originalFireServer, remoteEventInstance, unpack(grabArgs))
-                        if not grabSuccess then
-                             warn("HOOK_ERROR", "Error firing GrabMinigameItem via originalFireServer:", grabErr)
-                        end
-                         -- Small delay between rapid fires might be needed if server throttles
-                         task.wait(0.05) 
-                    end
-                    print("HOOK", "Finished firing all GrabMinigameItem events.")
-                    
-                    -- Decide whether to call the original FinishMinigame or not.
-                    -- Let's try NOT calling it, assuming the server might auto-finish after a valid grab.
-                    print("HOOK", "Skipping original FinishMinigame call.")
-                    -- If skipping doesn't work, you might need to call it here:
-                    -- print("HOOK", "Calling original FinishMinigame now.")
-                    -- pcall(originalFireServer, self, unpack(args)) 
-                    return -- Stop execution here for this hooked call
-                else
-                    print("HOOK", "No items found to grab, proceeding with original FinishMinigame.")
-                    -- Fall through to call original if no items were found anyway
-                end
-            elseif eventName == "GrabMinigameItem" then
-                -- Optional: Log when GrabMinigameItem is fired normally (e.g., by our own script)
-                -- print("HOOK_DEBUG", "GrabMinigameItem fired normally with ID:", args[2])
-            end
-
-            -- If it wasn't the specific FinishMinigame call we wanted to hijack,
-            -- or if the flag wasn't set, just execute the original function.
-            return pcall(originalFireServer, self, ...) -- Pass 'self' and original args
-        end))
-    end)
-
-    if not hookSuccess then
-        warn("ERROR", "HookRemoteEvent: Failed to apply hook! Error:", hookError)
-        -- Attempt to restore original function if hook failed badly
-        if remoteEventInstance and originalFireServer then remoteEventInstance.FireServer = originalFireServer end
-        remoteEventInstance = nil
-        return false
-    end
-
-    print("INFO", "Successfully hooked RemoteEvent:FireServer.")
-    return true
-end
-
-
--- =========================================================================
--- CORE SCRIPT LOGIC (Robot Claw Collector) - Using Hook Attempt
--- =========================================================================
 local isMinigameLogicRunning = false 
 
 local function GetRemoteEvent() if remoteEventCache and remoteEventCache.Parent then return remoteEventCache end; print("INFO","Locating RemoteEvent..."); local rp="ReplicatedStorage.Shared.Framework.Network.Remote.Event"; local s,r=pcall(function()return ReplicatedStorage:WaitForChild("Shared",25):WaitForChild("Framework",12):WaitForChild("Network",12):WaitForChild("Remote",12):WaitForChild("Event",12)end); if not s or not r or not r:IsA("RemoteEvent")then warn("ERROR","Failed find RemoteEvent",rp,s and("- Val: "..tostring(r))or("- PErr: "..tostring(r)));remoteEventCache=nil;return nil end; print("INFO","RemoteEvent found:",r:GetFullName());remoteEventCache=r;return r end
-function StartRobotClawInsane() local r=GetRemoteEvent();if not r then return end;local a={"StartMinigame","Robot Claw","Insane"};print("ACTION","Attempting to fire StartMinigame: Robot Claw (Insane)");local s,e=pcall(function()r:FireServer(unpack(a))end);if not s then warn("ERROR","Failed fire StartMinigame:",e)else print("INFO","StartMinigame fired.")end end
-function GrabItem(itemId) local r=GetRemoteEvent();if not r then return end;local a={"GrabMinigameItem",itemId};pcall(function()r:FireServer(unpack(a))end)end -- Normal grab call (will be handled by originalFireServer if hook is active)
+function StartRobotClawInsane() local r=GetRemoteEvent();if not r then return end;local a={"StartMinigame","Robot Claw","Insane"};print("ACTION","Attempting to fire StartMinigame: Robot Claw (Insane)");local s,e=pcall(function()r:FireServer(unpack(a))end);if not s then warn("ERROR","Failed fire StartMinigame:",e)else print("INFO","StartMinigame event fired.")end end
+function GrabItem(itemId) local r=GetRemoteEvent();if not r then return end;local a={"GrabMinigameItem",itemId};pcall(function()r:FireServer(unpack(a))end)end
 function FindAllItemIDs_Corrected() local ids={};print("INFO","FindAllItemIDs: Searching tag["..ITEM_TAG.."]");local itms=CollectionService:GetTagged(ITEM_TAG);print("INFO","FindAllItemIDs: Found",#itms,"tagged.");if #itms==0 then return ids end;for _,inst in ipairs(itms)do local g=inst:GetAttribute(ITEM_ID_ATTRIBUTE);if g and type(g)=="string"then table.insert(ids,g)else warn("WARN","FindAllItemIDs: Tagged item["..inst.Name.."] invalid attribute["..ITEM_ID_ATTRIBUTE.."]:",tostring(g))end end;print("INFO","FindAllItemIDs: Total",#ids,"valid IDs.");return ids end
 
+-- Main function: Attempts to collect ALL items rapidly. Success depends on server limits.
 function Main() 
     if isMinigameLogicRunning then print("WARN", "Minigame logic already running."); return end
     isMinigameLogicRunning = true
-    print("ACTION", "Robot Claw Collector sequence initiated (Hook Mode).")
+    print("ACTION", "Robot Claw Collector sequence initiated (Rapid Fire Mode).")
     
-    -- Ensure the hook is active before starting
-    if not remoteEventInstance or not originalFireServer then
-        warn("ERROR", "Hook not active or failed to initialize. Aborting.")
-        isMinigameLogicRunning = false
-        return
-    end
-
     StartRobotClawInsane()
 
-    print("INFO", "Waiting for tagged items ["..ITEM_TAG.."] to appear (max 15s)...")
+    print("INFO", "Waiting for tagged items ["..ITEM_TAG.."] to appear (max 10s)...")
     local startTime = tick()
     local itemsDetected = false
     repeat
         if #CollectionService:GetTagged(ITEM_TAG) > 0 then itemsDetected = true; break end
-        wait(0.25)
-    until tick() - startTime > 15 
+        task.wait(0.15) -- Check quickly
+    until tick() - startTime > 10 
 
     if not itemsDetected then
-        warn("WARN", "Timeout: No tagged items detected after 15s. Aborting.")
+        warn("WARN", "Timeout: No tagged items detected after 10s. Aborting.")
         isMinigameLogicRunning = false; return
     end
     
-    print("INFO", "Items detected. Setting flag to fire all items on FinishMinigame intercept.")
-    shouldFireAllItems = true -- SET THE FLAG FOR THE HOOK
+    print("INFO", "Items detected. Finding all item IDs...")
+    wait(0.5) -- Brief pause for full spawn maybe
 
-    -- Now we wait for the game to naturally try and end the minigame.
-    -- This could be via timer, or maybe the internal logic calls FinishMinigame after the first grab.
-    -- The hook we set up should intercept the FinishMinigame call.
-    print("INFO", "Waiting for game to trigger 'FinishMinigame' (hook is active)...")
+    local itemIDsToCollect = FindAllItemIDs_Corrected() 
     
-    -- We don't manually collect here anymore. We rely on the hook.
-    -- We might need a timeout here in case FinishMinigame is never called by the game script.
-    local waitEndTime = tick() + 45 -- Wait up to 45 seconds for the hook to trigger
-    while shouldFireAllItems and tick() < waitEndTime do
-        -- Loop while waiting for the hook to reset the flag or timeout
-        if not (ScreenGui and ScreenGui.Parent and MainWindow and MainWindow.Visible) then print("INFO","GUI closed/hidden, aborting wait."); break end
-        wait(0.5)
+    if #itemIDsToCollect == 0 then
+        print("WARN", "No valid item IDs found by FindAllItemIDs. Aborting collection.")
+        isMinigameLogicRunning = false; return
     end
 
-    if shouldFireAllItems then
-        -- Hook didn't run (timeout or GUI closed)
-        warn("WARN", "Hook did not seem to trigger within timeout or GUI was closed. Resetting flag.")
-        shouldFireAllItems = false 
-    else
-        print("INFO", "Hook appears to have executed (flag is false).")
+    print("ACTION", "Starting RAPID collection of", #itemIDsToCollect, "items found...")
+    print("WARN", "Server rules will likely only grant the first item collected.")
+    
+    for i, itemID in ipairs(itemIDsToCollect) do
+        -- No artificial delay here, fire as fast as the loop iterates + network allows
+        if not (ScreenGui and ScreenGui.Parent and MainWindow and MainWindow.Visible) then print("INFO","GUI closed/hidden, stopping collection."); break end
+        print("INFO", "Attempting collect item", i, "/", #itemIDsToCollect, "-", itemID)
+        GrabItem(itemID)
+        task.wait() -- Minimal yield to prevent script exhaustion on large numbers, but still very fast
     end
-
-    print("INFO", "Main function cycle seemingly completed (actual collection handled by hook).")
+    
+    print("INFO", "All collection commands sent.")
+    print("INFO", "Note: Only items allowed by server rules will actually be awarded.")
     isMinigameLogicRunning = false
 end
 
 -- =========================================================================
--- INITIALIZATION
+-- INITIALIZATION (Same as before)
 -- =========================================================================
 local guiBuildSuccess, guiError = pcall(BuildGUI) 
-if guiBuildSuccess and ScreenGui and MainWindow then
-    AddToConsole("INFO", SCRIPT_TITLE .. " initialized. GUI ready.")
-    -- Attempt to apply the hook AFTER building GUI
-    local hookStatus = HookRemoteEvent()
-    if hookStatus then
-        AddToConsole("INFO", "RemoteEvent Hook activated successfully.")
-        AddToConsole("INFO", "Select 'Collector' tab and click 'Start Robot Claw'.")
-    else
-        AddToConsole("ERROR", "Failed to activate RemoteEvent Hook. Script will run without bypass attempt.")
-        AddToConsole("WARN", "Collection might only grab one item due to server limits.")
-    end
-else
-    oldWarn("FATAL_ERROR: GUI could not be built. Error:", guiError or "Unknown")
-    oldPrint("FATAL_ERROR: GUI could not be built.")
-end
-
--- Ensure hook is removed if the script is destroyed or stops unexpectedly (Best effort)
-if ScreenGui then
-    ScreenGui.Destroying:Connect(function()
-        if remoteEventInstance and originalFireServer then
-            pcall(function() -- Prevent errors if already unhooked or invalid
-                unhookfunction(remoteEventInstance.FireServer) 
-                remoteEventInstance.FireServer = originalFireServer 
-            end)
-            print("INFO", "Attempted to unhook RemoteEvent:FireServer on GUI destroy.")
-        end
-    end)
-end
+if guiBuildSuccess and ScreenGui and MainWindow then AddToConsole("INFO", SCRIPT_TITLE .. " initialized. GUI ready."); AddToConsole("INFO", "Select 'Collector' tab and click 'Start Robot Claw'.")
+else oldWarn("FATAL_ERROR: GUI could not be built. Error:", guiError or "Unknown"); oldPrint("FATAL_ERROR: GUI could not be built.") end
